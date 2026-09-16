@@ -20,7 +20,9 @@ conectó un backend real.
 - `src/lib/pdf.ts` — genera el PDF con Puppeteer (`@sparticuz/chromium` en
   producción/Vercel, Chrome local en desarrollo).
 - `src/lib/email.ts` — envío por Resend.
-- `src/lib/monday.ts` — creación de item vía GraphQL de Monday.com.
+- `src/lib/monday.ts` — crea el item en el board **Check 7 Digital** (id
+  `18431455073`) vía GraphQL y sube el PDF a su columna de archivo
+  (`add_file_to_column`).
 
 El PDF se genera a partir del **mismo HTML que ve el técnico en pantalla**
 (`document.querySelector('.ticket').outerHTML`), así que no hay una segunda
@@ -52,57 +54,73 @@ Ver `.env.example` para la lista completa. Resumen:
 | `RESEND_API_KEY` | Enviar el correo con el PDF | Sí |
 | `RESEND_FROM_EMAIL` | Remitente (debe ser de un dominio verificado en Resend) | Sí |
 | `MONDAY_API_TOKEN` | Crear el item en Monday | No (si falta, se omite Monday sin romper el envío) |
-| `MONDAY_BOARD_ID` | Tablero donde crear el item | No (idem) |
-| `MONDAY_COL_*` | Mapeo de columnas del tablero | No (cada columna se manda solo si su ID está definido) |
+| `MONDAY_BOARD_ID` / `MONDAY_COL_*` | Tablero y columnas destino | No — ya traen como default el board real "Check 7 Digital" |
 
 **Sin `RESEND_API_KEY`/`RESEND_FROM_EMAIL` el envío del comprobante falla** (es
 el propósito principal del flujo). Monday, en cambio, es best-effort: si falla
-o no está configurado, el correo se envía igual y el técnico ve un aviso de
-que no se registró en Monday.
+o no está configurado (falta `MONDAY_API_TOKEN`), el correo se envía igual y el
+técnico ve un aviso de que no se registró en Monday.
 
-## Pendiente de definir con quien administra Monday
+## Monday.com
 
-1. En qué tablero se crea el item por cada servicio (o si actualiza el lead
-   existente del embudo — hoy este proyecto solo **crea** items nuevos, no
-   actualiza existentes).
-2. IDs de columna reales. Para obtenerlos:
-   ```
-   query { boards(ids: [TU_BOARD_ID]) { columns { id title type } } }
-   ```
-   en https://monday.com/developers/v2/try-it-yourself, y llenar los
-   `MONDAY_COL_*` en `.env.local` / Vercel con esos IDs.
-3. `MONDAY_GROUP_ID` si el item debe caer en un grupo específico del tablero.
+Cada servicio crea un item nuevo (no actualiza leads existentes) en el board
+**Check 7 Digital** (workspace Power Delivery, id `18431455073`), llenando:
+
+- Nombre del item ← `cliente`
+- Fecha de registro ← `fecha`
+- ID ← `idCliente`
+- Correo cliente ← `correoCliente`
+- Check 7 (columna de archivo) ← el PDF del comprobante, adjunto directo
+
+El resto de los datos del servicio (técnico, diagnóstico, calificación, etc.)
+no se mandan a Monday — solo viven en el PDF que recibe el cliente. Si más
+adelante se quiere más detalle en Monday, se agregan columnas al board y se
+mapean en `src/lib/monday.ts`.
 
 ## Despliegue en Vercel
 
+Ya desplegado: proyecto `power-delivery/check7-digital`, live en
+https://check7-digital.vercel.app. Variables de entorno están cargadas en
+Production vía dashboard/CLI (`npx vercel env add NOMBRE production`).
+
+Para desplegar un cambio nuevo:
+
 ```bash
-npx vercel link
-npx vercel env add RESEND_API_KEY
-npx vercel env add RESEND_FROM_EMAIL
-# ...y el resto de variables de .env.example que apliquen
-npx vercel --prod
+npx vercel deploy --prod
 ```
 
-O conecta el repo de GitHub desde el dashboard de Vercel y define las
-variables de entorno ahí (Settings → Environment Variables).
+La conexión Git↔Vercel para auto-deploy en cada push todavía no está activada
+(hace falta instalar la Vercel GitHub App desde Project → Settings → Git en
+el dashboard); mientras tanto los despliegues son manuales con el comando de
+arriba.
 
-**Nota sobre el plan de Vercel:** generar el PDF con Chromium headless usa
-bastante memoria y toma unos segundos (cold start de Chromium + render +
-espera de fuentes). `vercel.json` ya pide 1769 MB y 60s de `maxDuration` para
-la función `api/submit`. El plan Hobby limita esto (10s por defecto, hasta
-1024 MB de memoria); si el envío falla por timeout en producción, lo más
-probable es que se necesite plan Pro.
+**Nota sobre `@sparticuz/chromium` en Vercel:** el file tracer de Next.js no
+incluye el binario de Chromium por default aunque el paquete esté marcado
+como externo — `next.config.ts` usa `outputFileTracingIncludes` para forzarlo.
+Sin eso, `/api/submit` falla con `The input directory ".../chromium/bin" does
+not exist`.
+
+**Nota sobre el plan de Vercel:** generar el PDF con Chromium headless toma
+unos segundos (cold start de Chromium + render + espera de fuentes) — en
+production se ha visto entre 5 y 8s. `vercel.json` pide `maxDuration: 60` para
+la función `api/submit`. El plan Hobby por default da 10s; si empieza a fallar
+por timeout con tráfico real, hay que subir a Pro.
 
 ## Subdominio check.powerdelivery.mx
 
-1. En Vercel: Project → Settings → Domains → agrega `check.powerdelivery.mx`.
-2. Vercel te da el registro DNS exacto a crear (normalmente un `CNAME` a
-   `cname.vercel-dns.com`, a veces un `A` a `76.76.21.21`).
-3. En el DNS de `powerdelivery.mx` (fuera de este proyecto — es el proveedor
-   donde esté administrado el dominio), crea ese registro para el host
-   `check`.
-4. Espera la propagación (minutos a un par de horas) y Vercel emitirá el
-   certificado SSL automáticamente.
+DNS administrado en Neubox (nameservers `ns143/144/245.neubox.net`) — **no**
+son los de Vercel, así que el dominio se conecta con un registro `A`, no
+cambiando nameservers (eso movería todo `powerdelivery.mx`, incluyendo el
+sitio en Duda, a Vercel).
+
+1. Ya agregado en Vercel: `npx vercel domains add check.powerdelivery.mx check7-digital`.
+2. Registro DNS creado en Neubox (Zone Editor → dominio → reemplazar el `A`
+   que Neubox generó automático al crear el subdominio):
+   ```
+   A   check   76.76.21.21
+   ```
+3. Verificar con `npx vercel domains inspect check.powerdelivery.mx` — cuando
+   ya no marque el warning de nameservers, Vercel emite el SSL solo.
 
 ## Decisiones ya tomadas (ver brief original)
 

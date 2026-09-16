@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
 
   let mondayError: string | undefined;
   try {
-    await createMondayItem(state);
+    await createMondayItem(state, pdfBuffer);
   } catch (err) {
     console.error("[submit] Monday.com item creation failed", err);
     mondayError = err instanceof Error ? err.message : "Error desconocido en Monday.com.";
