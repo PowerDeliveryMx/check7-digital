@@ -1,0 +1,8 @@
+{
+  "functions": {
+    "src/app/api/submit/route.ts": {
+      "memory": 1769,
+      "maxDuration": 60
+    }
+  }
+}

@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Plain vanilla JS ported from the bosquejo, served as a static asset —
+    // not part of the TS app bundle, so it isn't linted as such.
+    "public/**",
   ]),
 ]);
 
