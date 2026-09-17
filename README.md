@@ -108,19 +108,27 @@ por timeout con tráfico real, hay que subir a Pro.
 
 ## Subdominio check.powerdelivery.mx
 
+**Listo** — https://check.powerdelivery.mx está en vivo con SSL válido.
+
 DNS administrado en Neubox (nameservers `ns143/144/245.neubox.net`) — **no**
 son los de Vercel, así que el dominio se conecta con un registro `A`, no
 cambiando nameservers (eso movería todo `powerdelivery.mx`, incluyendo el
-sitio en Duda, a Vercel).
+sitio en Duda, a Vercel):
 
-1. Ya agregado en Vercel: `npx vercel domains add check.powerdelivery.mx check7-digital`.
-2. Registro DNS creado en Neubox (Zone Editor → dominio → reemplazar el `A`
-   que Neubox generó automático al crear el subdominio):
-   ```
-   A   check   76.76.21.21
-   ```
-3. Verificar con `npx vercel domains inspect check.powerdelivery.mx` — cuando
-   ya no marque el warning de nameservers, Vercel emite el SSL solo.
+```
+A   check   76.76.21.21
+```
+
+Dos cosas que causaron fricción al configurarlo, por si vuelve a pasar con
+otro subdominio en Neubox:
+
+1. El subdominio `check` estaba dado de alta como **addon domain** (hosting)
+   en cPanel, y eso pisaba cualquier edición manual del registro `A` en la
+   Zona DNS — hubo que eliminarlo de la lista de "Dominios" antes de que el
+   registro manual se mantuviera.
+2. El Zone Editor de Neubox tiene un botón separado **"Save All Records"** —
+   sin darle clic ahí, los cambios se veían guardados en la fila pero nunca
+   se publicaban a los nameservers reales (el serial del SOA no subía).
 
 ## Decisiones ya tomadas (ver brief original)
 
