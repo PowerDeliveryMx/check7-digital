@@ -1,5 +1,7 @@
 # Check 7 Digital
 
+> Auto-deploy desde GitHub conectado — este commit es la prueba.
+
 Formulario digital del "Check 7" de Power Delivery (batería vs. alternador). El
 técnico llena el formulario en el celular junto al cliente; al terminar se
 genera un PDF del comprobante, se envía por correo al cliente (Resend) y se
