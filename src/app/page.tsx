@@ -15,9 +15,7 @@ export default function Check7Page() {
           <div className="phase-label" id="phaseLabel">
             Datos del servicio
           </div>
-          <div className="progress-track">
-            <div className="progress-fill" id="progressFill" style={{ width: "0%" }} />
-          </div>
+          <div className="stepper" id="stepper" />
           <div className="progress-caption" id="progressCaption">
             Paso 1 de 13
           </div>

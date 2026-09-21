@@ -142,7 +142,7 @@ function needleSvg(cx, cy, r, inner, outer, pct, id){
   </g>`;
 }
 
-function arcGaugeMarkup({value, min, max, verdict, zone}){
+function arcGaugeMarkup({value, min, max, verdict, zone, live=true, big=false}){
   const cx = 150, cy = 128, r = 98;
   const pct = valuePct(value, min, max);
   const full = arcPath(cx, cy, r, ARC_START, ARC_START-ARC_SWEEP);
@@ -154,16 +154,16 @@ function arcGaugeMarkup({value, min, max, verdict, zone}){
   }
   let ticks = '';
   for(let v=Math.ceil(min); v<=max; v++){
-    const p = polar(cx, cy, r+19, angleFor((v-min)/(max-min)));
+    const p = polar(cx, cy, r+(big?22:19), angleFor((v-min)/(max-min)));
     ticks += `<text class="ag-tick" x="${p.x.toFixed(1)}" y="${p.y.toFixed(1)}">${v}</text>`;
   }
   return `<svg class="arc-gauge" viewBox="0 0 300 200" role="img" aria-label="Voltaje medido">
     <path class="ag-track" d="${full}"/>
     ${zoneHtml}
-    <path id="liveGaugeProgress" class="ag-progress" pathLength="100" d="${full}" style="stroke-dashoffset:${100*(1-(pct||0))};stroke:${toneColor(verdict)}"/>
+    <path${live?' id="liveGaugeProgress"':''} class="ag-progress" pathLength="100" d="${full}" style="stroke-dashoffset:${100*(1-(pct||0))};stroke:${toneColor(verdict)}"/>
     ${ticks}
-    ${needleSvg(cx, cy, r, 13, 9, pct, 'liveGaugeNeedle')}
-    <text id="liveGaugeValue" class="ag-value" x="${cx}" y="${cy+12}">${valueText(value)}</text>
+    ${needleSvg(cx, cy, r, 13, 9, pct, live?'liveGaugeNeedle':null)}
+    <text${live?' id="liveGaugeValue"':''} class="ag-value" x="${cx}" y="${cy+12}">${valueText(value)}</text>
     <text class="ag-unit" x="${cx}" y="${cy+36}">VOLTS</text>
   </svg>`;
 }
@@ -215,8 +215,11 @@ function updateBarsChart(pct, color){
 function chipStatusHtml(verdict){
   return `<span id="verdictBadge" class="chip-status${verdict?' show '+verdict.tone:''}">${verdict?verdict.label:''}</span>`;
 }
+function rangeText(step, zone){
+  return step.type==='carga' ? `${zone.lo.toFixed(1)} – ${zone.hi.toFixed(1)} V` : `≥ ${zone.lo.toFixed(1)} V`;
+}
 function rangeRowHtml(step, zone, chip){
-  const text = step.type==='carga' ? `${zone.lo.toFixed(1)} – ${zone.hi.toFixed(1)} V` : `≥ ${zone.lo.toFixed(1)} V`;
+  const text = rangeText(step, zone);
   return `<div class="range-row">
     <div class="range-info"><span class="range-swatch"></span><div><div class="range-label">Rango ideal</div><div class="range-val">${text}</div></div></div>
     ${chip||''}
@@ -254,6 +257,29 @@ function statusPillHtml(verdict, hasValue){
   if(!verdict) return `<span class="badge neutral">Lectura</span>`;
   const icon = verdict.tone==='pass' ? '✓' : verdict.tone==='fail' ? '✕' : '!';
   return `<span class="badge ${verdict.tone}">${icon} ${verdict.label}</span>`;
+}
+function buildFinalGauges(){
+  const items = [
+    {n:3, title:'Alternador', sub:'Carga final'},
+    {n:7, title:'Batería', sub:'Retención final'}
+  ];
+  const cards = items.map(it=>{
+    const step = CHECK7[it.n-1];
+    const val = state.volts[it.n];
+    const verdict = verdictFor(step, val);
+    const [min,max] = rangeFor(step);
+    const zone = zoneFor(step);
+    return `<div class="final-card">
+      <div class="final-title">${it.title}</div>
+      <div class="final-sub">${it.sub}</div>
+      <div class="gauge-stage">${arcGaugeMarkup({value:val, min, max, verdict, zone, live:false, big:true})}</div>
+      <div class="final-foot">
+        ${statusPillHtml(verdict, !isNaN(parseFloat(val)))}
+        <span class="final-range">Rango ideal ${rangeText(step, zone)}</span>
+      </div>
+    </div>`;
+  }).join('');
+  return `<div class="ticket-final"><div class="section-title">Resultado final</div><div class="final-grid">${cards}</div></div>`;
 }
 function buildResultGrid(){
   const measured = [1,2,3,5,7].map(n=>{
@@ -310,11 +336,23 @@ function yearOptionsHtml(selected){
   return opts;
 }
 
+function updateStepper(){
+  const st = document.getElementById('stepper');
+  if(!st.firstChild){
+    st.innerHTML = `<div class="stepper-line"><div class="stepper-line-fill" id="stepperFill"></div></div><div class="stepper-dots">${SCREENS.map(()=>'<span class="sdot"></span>').join('')}</div>`;
+  }
+  const last = SCREENS.length-1;
+  st.querySelectorAll('.sdot').forEach((d,i)=>{
+    d.className = 'sdot' + (i<idx || (idx===last && i===last) ? ' done' : i===idx ? ' current' : '');
+  });
+  document.getElementById('stepperFill').style.width = (idx/last*100)+'%';
+}
+
 function render(){
   clearInterval(countdownInterval);
   const screen = SCREENS[idx];
   document.getElementById('folioTag').textContent = state.folio;
-  document.getElementById('progressFill').style.width = ((idx)/(SCREENS.length-1)*100)+'%';
+  updateStepper();
   document.getElementById('progressCaption').textContent = `Paso ${idx+1} de ${SCREENS.length}`;
   const app = document.getElementById('app');
   const nav = document.getElementById('navbar');
@@ -457,7 +495,6 @@ function render(){
 
   else if(screen==='resumen'){
     document.getElementById('phaseLabel').textContent = 'Comprobante';
-    document.getElementById('progressFill').style.width='100%';
     html = buildResumen();
     navHtml = `<button class="btn btn-secondary" onclick="go(-1)">Editar</button><button class="btn btn-primary" onclick="nuevoServicio()">Nuevo servicio</button>`;
   }
@@ -566,13 +603,67 @@ function finishEval(){
   state.eval.comentarios = c.value;
   go(1);
 }
+/* ---------- Intro Check 7 ---------- */
+let introPlayed = false;
+let introTimer = null;
+function introMarkup(){
+  let dots = '';
+  for(let i=0; i<7; i++){
+    const a = (-90 + i*360/7);
+    const p = polar(100, 100, 88, -a);
+    dots += `<circle class="idot" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="4.5" style="animation-delay:${(0.8+i*0.17).toFixed(2)}s"/>`;
+  }
+  return `
+    <div class="intro-grid"></div>
+    <div class="intro-scan"></div>
+    <div class="intro-center">
+      <div class="intro-glow"></div>
+      <svg class="intro-ring" viewBox="0 0 200 200" aria-hidden="true">
+        <circle class="iring" cx="100" cy="100" r="88" pathLength="100" style="transform:rotate(-90deg);transform-origin:100px 100px"/>
+        <circle class="iring-spin" cx="100" cy="100" r="94" pathLength="100"/>
+        ${dots}
+      </svg>
+      <div class="intro-word">
+        <svg class="intro-bolt" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"/></svg>
+        <span class="iw-check">Check</span>
+        <span class="iw-seven">7</span>
+      </div>
+    </div>
+    <div class="intro-tag">Diagnóstico eléctrico</div>
+    <div class="intro-badge">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3.5v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9v-5L12 3z"/><path d="M9 12l2 2 4-4.5"/></svg>
+      Software exclusivo Power Delivery
+    </div>
+    <div class="intro-skip">Toca para continuar</div>`;
+}
+function playCheck7Intro(){
+  const el = document.createElement('div');
+  el.id = 'check7Intro';
+  el.className = 'intro';
+  el.innerHTML = introMarkup();
+  el.onclick = closeIntro;
+  document.body.appendChild(el);
+  const reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  introTimer = setTimeout(closeIntro, reduced ? 1400 : 3800);
+}
+function closeIntro(){
+  clearTimeout(introTimer);
+  const el = document.getElementById('check7Intro');
+  if(!el || el.classList.contains('out')) return;
+  el.classList.add('out');
+  setTimeout(()=>el.remove(), 550);
+}
+
 function go(delta){
+  const leavingPre = delta>0 && SCREENS[idx]==='pre';
   idx = Math.max(0, Math.min(SCREENS.length-1, idx+delta));
   render();
+  if(leavingPre && !introPlayed){ introPlayed = true; playCheck7Intro(); }
 }
 function nuevoServicio(){
   state = blankState(newFolio());
   idx = 0;
+  introPlayed = false;
   render();
 }
 
@@ -760,6 +851,7 @@ function buildResumen(){
           ${categoryBarHtml('Batería', battPct)}
         </div>
       </div>
+      ${buildFinalGauges()}
       <div class="ticket-body">
         <div class="ticket-meta-grid">
           <div class="meta-item"><div class="meta-label">ID Cliente</div><div class="meta-value">${state.idCliente||'—'}</div></div>
