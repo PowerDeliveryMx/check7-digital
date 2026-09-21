@@ -1,11 +1,11 @@
 const CHECK7 = [
-  {n:1, cat:'Alternador', title:'Carga inicial', instruction:'Enciende el vehículo.', type:'baseline'},
-  {n:2, cat:'Alternador', title:'Carga en baja (sin acelerar)', instruction:'Apaga todos los accesorios del vehículo (radio, luces, A/C).', type:'carga'},
-  {n:3, cat:'Alternador', title:'Carga en alta', instruction:'Enciende los accesorios y acelera a un solo paso a 2000 RPM durante 7 segundos.', type:'carga'},
-  {n:4, cat:'Alternador', title:'Estabilización', instruction:'Apaga el automóvil y deja reposar durante 7 segundos.', type:'stabilization'},
-  {n:5, cat:'Batería', title:'Retención con arranque', instruction:'Enciende el automóvil.', type:'retiene'},
-  {n:6, cat:'Batería', title:'Estabilización', instruction:'Apaga el automóvil y deja reposar durante 7 segundos.', type:'stabilization'},
-  {n:7, cat:'Batería', title:'Retención con tester', instruction:'Con ayuda del cliente, realiza una simulación de arranque con el tester.', type:'retiene'}
+  {n:1, short:'Carga inicial', cat:'Alternador', title:'Carga inicial', instruction:'Enciende el vehículo.', type:'baseline'},
+  {n:2, short:'Carga en baja', cat:'Alternador', title:'Carga en baja (sin acelerar)', instruction:'Apaga todos los accesorios del vehículo (radio, luces, A/C).', type:'carga'},
+  {n:3, short:'Carga en alta', cat:'Alternador', title:'Carga en alta', instruction:'Enciende los accesorios y acelera a un solo paso a 2000 RPM durante 7 segundos.', type:'carga'},
+  {n:4, short:'Estabilización', cat:'Alternador', title:'Estabilización', instruction:'Apaga el automóvil y deja reposar durante 7 segundos.', type:'stabilization'},
+  {n:5, short:'Retención arranque', cat:'Batería', title:'Retención con arranque', instruction:'Enciende el automóvil.', type:'retiene'},
+  {n:6, short:'Estabilización', cat:'Batería', title:'Estabilización', instruction:'Apaga el automóvil y deja reposar durante 7 segundos.', type:'stabilization'},
+  {n:7, short:'Retención tester', cat:'Batería', title:'Retención con tester', instruction:'Con ayuda del cliente, realiza una simulación de arranque con el tester.', type:'retiene'}
 ];
 const PRECHECK = [
   {key:'enciende', label:'¿Enciende el vehículo?'},
@@ -106,50 +106,174 @@ function batteryIconHtml(status){
   </svg>`;
 }
 
-/* ---------- Gauge radial ---------- */
-function gaugeGeom(size){
-  const strokeW = size<80 ? 6 : 9;
-  const r = (size/2) - strokeW/2 - 2;
-  const circ = 2*Math.PI*r;
-  return {strokeW, r, circ};
+/* ---------- Gauges ---------- */
+const ARC_START = 210, ARC_SWEEP = 240;
+const BAR_STEP = 0.25;
+
+function polar(cx, cy, r, deg){
+  const a = deg*Math.PI/180;
+  return {x: cx + r*Math.cos(a), y: cy - r*Math.sin(a)};
 }
-function gaugeMarkup(opts){
-  const {size, value, min, max, verdict, unit, live, zone, showValue=true} = opts;
-  const {strokeW, r, circ} = gaugeGeom(size);
-  const cx = size/2, cy = size/2;
-  const num = parseFloat(value);
-  let pct = isNaN(num) ? 0 : (num-min)/(max-min);
-  pct = Math.max(0, Math.min(1, pct));
-  const offset = circ*(1-pct);
-  const color = verdict ? (verdict.tone==='pass'?'var(--pass)':verdict.tone==='fail'?'var(--fail)':'var(--warn)') : 'var(--blue)';
-  const valText = isNaN(num) ? '--' : num.toFixed(2);
-  const fontSize = size<80 ? 12 : Math.round(size*0.19);
-  const unitSize = size<80 ? 8 : 11;
-  const progIdAttr = live ? ' id="liveGaugeProgress"' : '';
-  const valIdAttr = live ? ' id="liveGaugeValue"' : '';
+function arcPath(cx, cy, r, fromDeg, toDeg){
+  const s = polar(cx,cy,r,fromDeg), e = polar(cx,cy,r,toDeg);
+  const large = (fromDeg-toDeg) > 180 ? 1 : 0;
+  return `M${s.x.toFixed(2)} ${s.y.toFixed(2)}A${r} ${r} 0 ${large} 1 ${e.x.toFixed(2)} ${e.y.toFixed(2)}`;
+}
+function valuePct(raw, min, max){
+  const n = parseFloat(raw);
+  if(isNaN(n)) return null;
+  return Math.max(0, Math.min(1, (n-min)/(max-min)));
+}
+function angleFor(pct){ return ARC_START - ARC_SWEEP*pct; }
+function toneColor(verdict){
+  if(verdict && verdict.tone==='fail') return 'var(--fail)';
+  if(verdict && verdict.tone==='warn') return 'var(--warn)';
+  return 'var(--blue)';
+}
+function valueText(raw){
+  const n = parseFloat(raw);
+  return isNaN(n) ? '--' : n.toFixed(2);
+}
+function needleSvg(cx, cy, r, inner, outer, pct, id){
+  const rot = -angleFor(pct===null ? 0 : pct);
+  return `<g${id?` id="${id}"`:''} class="ag-needle${pct===null?'':' on'}" style="transform:rotate(${rot}deg);transform-origin:${cx}px ${cy}px">
+    <line class="ag-needle-halo" x1="${cx+r-inner}" y1="${cy}" x2="${cx+r+outer}" y2="${cy}"/>
+    <line class="ag-needle-line" x1="${cx+r-inner}" y1="${cy}" x2="${cx+r+outer}" y2="${cy}"/>
+  </g>`;
+}
+
+function arcGaugeMarkup({value, min, max, verdict, zone}){
+  const cx = 150, cy = 128, r = 98;
+  const pct = valuePct(value, min, max);
+  const full = arcPath(cx, cy, r, ARC_START, ARC_START-ARC_SWEEP);
   let zoneHtml = '';
   if(zone){
-    const zLoPct = Math.max(0, Math.min(1, (zone.lo-min)/(max-min)));
-    const zHiPct = Math.max(0, Math.min(1, (zone.hi-min)/(max-min)));
-    const zLen = (zHiPct-zLoPct)*circ;
-    zoneHtml = `<circle class="rg-zone" cx="${cx}" cy="${cy}" r="${r}" stroke-width="${strokeW}" fill="none"
-      stroke="rgba(53,196,98,0.30)" stroke-dasharray="${zLen} ${circ-zLen}" stroke-dashoffset="${-zLoPct*circ}"
-      transform="rotate(-90 ${cx} ${cy})"/>`;
+    const a1 = angleFor(Math.max(0, Math.min(1, (zone.lo-min)/(max-min))));
+    const a2 = angleFor(Math.max(0, Math.min(1, (zone.hi-min)/(max-min))));
+    zoneHtml = `<path class="ag-zone" d="${arcPath(cx, cy, r-15, a1, a2)}"/>`;
   }
-  return `
-  <div class="radial-gauge" style="width:${size}px;height:${size}px;">
-    <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
-      <circle class="rg-track" cx="${cx}" cy="${cy}" r="${r}" stroke-width="${strokeW}" fill="none"/>
-      ${zoneHtml}
-      <circle class="rg-progress"${progIdAttr} cx="${cx}" cy="${cy}" r="${r}" stroke-width="${strokeW}" fill="none"
-        stroke-dasharray="${circ}" stroke-dashoffset="${offset}" stroke="${color}"
-        transform="rotate(-90 ${cx} ${cy})" stroke-linecap="round"/>
-    </svg>
-    ${showValue ? `<div class="rg-center">
-      <div class="rg-value"${valIdAttr} style="font-size:${fontSize}px;color:${color}">${valText}</div>
-      <div class="rg-unit" style="font-size:${unitSize}px;">${unit}</div>
-    </div>` : ''}
+  let ticks = '';
+  for(let v=Math.ceil(min); v<=max; v++){
+    const p = polar(cx, cy, r+19, angleFor((v-min)/(max-min)));
+    ticks += `<text class="ag-tick" x="${p.x.toFixed(1)}" y="${p.y.toFixed(1)}">${v}</text>`;
+  }
+  return `<svg class="arc-gauge" viewBox="0 0 300 200" role="img" aria-label="Voltaje medido">
+    <path class="ag-track" d="${full}"/>
+    ${zoneHtml}
+    <path id="liveGaugeProgress" class="ag-progress" pathLength="100" d="${full}" style="stroke-dashoffset:${100*(1-(pct||0))};stroke:${toneColor(verdict)}"/>
+    ${ticks}
+    ${needleSvg(cx, cy, r, 13, 9, pct, 'liveGaugeNeedle')}
+    <text id="liveGaugeValue" class="ag-value" x="${cx}" y="${cy+12}">${valueText(value)}</text>
+    <text class="ag-unit" x="${cx}" y="${cy+36}">VOLTS</text>
+  </svg>`;
+}
+
+function barsMarkup({min, max, zone}){
+  const N = Math.round((max-min)/BAR_STEP);
+  const x0 = 10, x1 = 314, base = 94, maxH = 82, bw = 7, cr = 3.5;
+  const slot = (x1-x0)/N;
+  const mid = (zone.lo+zone.hi)/2, sigma = 1.3;
+  let bars = '';
+  for(let i=0; i<N; i++){
+    const v = min + BAR_STEP*(i+0.5);
+    const h = maxH*(0.28 + 0.72*Math.exp(-Math.pow(v-mid,2)/(2*sigma*sigma)));
+    const x = x0 + slot*i + (slot-bw)/2;
+    const top = base - h;
+    const inZone = v>=zone.lo && v<=zone.hi;
+    const f = n => n.toFixed(2);
+    bars += `<path class="ag-bar${inZone?' in':''}" data-i="${i}" data-cx="${f(x+bw/2)}" data-top="${f(top)}" d="M${f(x)} ${base}V${f(top+cr)}Q${f(x)} ${f(top)} ${f(x+cr)} ${f(top)}H${f(x+bw-cr)}Q${f(x+bw)} ${f(top)} ${f(x+bw)} ${f(top+cr)}V${base}Z"/>`;
+  }
+  let ticks = '';
+  for(let v=Math.ceil(min/2)*2; v<=max; v+=2){
+    const x = x0 + (v-min)/(max-min)*(x1-x0);
+    ticks += `<text class="ag-tick" x="${x.toFixed(1)}" y="${base+17}">${v}</text>`;
+  }
+  return `<svg id="liveBars" class="bars-chart" viewBox="0 0 324 118" role="img" aria-label="Voltaje medido sobre la escala de ${min} a ${max} volts">
+    <line class="ag-axis" x1="${x0}" y1="${base+1}" x2="${x1}" y2="${base+1}"/>
+    ${bars}
+    ${ticks}
+    <circle id="liveBarDot" class="ag-dot" r="5" cx="0" cy="0" style="opacity:0"/>
+  </svg>`;
+}
+
+function updateBarsChart(pct, color){
+  const svg = document.getElementById('liveBars');
+  if(!svg) return;
+  svg.querySelectorAll('.ag-bar.is-read').forEach(b=>{ b.classList.remove('is-read'); b.style.fill = ''; });
+  const dot = document.getElementById('liveBarDot');
+  if(pct===null){ dot.style.opacity = 0; return; }
+  const N = svg.querySelectorAll('.ag-bar').length;
+  const bar = svg.querySelector(`.ag-bar[data-i="${Math.min(N-1, Math.floor(pct*N))}"]`);
+  bar.classList.add('is-read');
+  bar.style.fill = color;
+  dot.setAttribute('cx', bar.dataset.cx);
+  dot.setAttribute('cy', parseFloat(bar.dataset.top) - 10);
+  dot.style.fill = color;
+  dot.style.opacity = 1;
+}
+
+function chipStatusHtml(verdict){
+  return `<span id="verdictBadge" class="chip-status${verdict?' show '+verdict.tone:''}">${verdict?verdict.label:''}</span>`;
+}
+function rangeRowHtml(step, zone, chip){
+  const text = step.type==='carga' ? `${zone.lo.toFixed(1)} – ${zone.hi.toFixed(1)} V` : `≥ ${zone.lo.toFixed(1)} V`;
+  return `<div class="range-row">
+    <div class="range-info"><span class="range-swatch"></span><div><div class="range-label">Rango ideal</div><div class="range-val">${text}</div></div></div>
+    ${chip||''}
   </div>`;
+}
+function gaugeStageHtml(step, value, min, max, zone, verdict){
+  if(step.type==='carga'){
+    return `<div class="bars-stage">
+      <div class="bars-head">
+        <div class="big-value"><span id="liveGaugeValue">${valueText(value)}</span><small>V</small></div>
+        ${chipStatusHtml(verdict)}
+      </div>
+      ${barsMarkup({min, max, zone})}
+    </div>
+    ${rangeRowHtml(step, zone)}`;
+  }
+  const arc = `<div class="gauge-stage">${arcGaugeMarkup({value, min, max, verdict, zone})}</div>`;
+  return zone ? arc + rangeRowHtml(step, zone, chipStatusHtml(verdict)) : arc;
+}
+
+function miniGaugeMarkup({value, min, max, verdict}){
+  const cx = 50, cy = 44, r = 33;
+  const pct = valuePct(value, min, max);
+  const full = arcPath(cx, cy, r, ARC_START, ARC_START-ARC_SWEEP);
+  const n = parseFloat(value);
+  return `<svg class="mini-gauge" viewBox="0 0 100 70" role="img" aria-label="${isNaN(n)?'Sin lectura':n.toFixed(2)+' volts'}">
+    <path class="ag-track" d="${full}"/>
+    <path class="ag-progress" pathLength="100" d="${full}" style="stroke-dashoffset:${100*(1-(pct||0))};stroke:${toneColor(verdict)}"/>
+    ${needleSvg(cx, cy, r, 6, 5, pct, null)}
+    <text class="mg-value" x="${cx}" y="${cy+6}">${valueText(value)}<tspan class="mg-unit" dx="2">V</tspan></text>
+  </svg>`;
+}
+function statusPillHtml(verdict, hasValue){
+  if(!hasValue) return `<span class="badge neutral">Sin lectura</span>`;
+  if(!verdict) return `<span class="badge neutral">Lectura</span>`;
+  const icon = verdict.tone==='pass' ? '✓' : verdict.tone==='fail' ? '✕' : '!';
+  return `<span class="badge ${verdict.tone}">${icon} ${verdict.label}</span>`;
+}
+function buildResultGrid(){
+  const measured = [1,2,3,5,7].map(n=>{
+    const step = CHECK7[n-1];
+    const val = state.volts[n];
+    const verdict = step.type==='baseline' ? null : verdictFor(step, val);
+    const [min,max] = rangeFor(step);
+    return `<div class="res-card">
+      <div class="res-title">${n}. ${step.short}</div>
+      ${miniGaugeMarkup({value:val, min, max, verdict})}
+      ${statusPillHtml(verdict, !isNaN(parseFloat(val)))}
+    </div>`;
+  }).join('');
+  const allDone = state.stabilizeDone[4] && state.stabilizeDone[6];
+  const stab = `<div class="res-card">
+    <div class="res-title">4 y 6. Estabilización</div>
+    <div class="res-stab-icon${allDone?'':' pending'}">${iconClock()}</div>
+    <span class="badge ${allDone?'pass':'fail'}">${allDone?'✓ Completadas':'✕ Pendiente'}</span>
+  </div>`;
+  return `<div class="res-grid">${measured}${stab}</div>`;
 }
 
 function yn(val){
@@ -254,10 +378,7 @@ function render(){
       const zone = zoneFor(step);
       const initVerdict = step.type==='baseline' ? null : verdictFor(step, state.volts[n]);
       body = `
-        <div class="gauge-stage">
-          ${gaugeMarkup({size:180, value:state.volts[n], min, max, verdict:initVerdict, unit:'VOLTS', live:true, zone})}
-        </div>
-        <div class="verdict"><span id="verdictBadge" class="${initVerdict?('show '+initVerdict.tone):''}">${initVerdict?initVerdict.label:''}</span></div>
+        ${gaugeStageHtml(step, state.volts[n], min, max, zone, initVerdict)}
         <div class="value-entry field">
           <label>Ingresa la lectura</label>
           <input type="number" step="0.01" inputmode="decimal" id="voltInput" placeholder="0.00" value="${state.volts[n]}" oninput="onVoltInput(${n})">
@@ -418,20 +539,22 @@ function onVoltInput(n){
   const val = el.value;
   const verdict = step.type==='baseline' ? null : verdictFor(step, val);
   const [min,max] = rangeFor(step);
-  const {circ} = gaugeGeom(180);
-  const num = parseFloat(val);
-  let pct = isNaN(num) ? 0 : (num-min)/(max-min);
-  pct = Math.max(0, Math.min(1, pct));
-  const offset = circ*(1-pct);
-  const color = verdict ? (verdict.tone==='pass'?'var(--pass)':verdict.tone==='fail'?'var(--fail)':'var(--warn)') : 'var(--blue)';
-  const progress = document.getElementById('liveGaugeProgress');
-  if(progress){ progress.style.strokeDashoffset = offset; progress.style.stroke = color; }
+  const pct = valuePct(val, min, max);
+  const color = toneColor(verdict);
   const valueEl = document.getElementById('liveGaugeValue');
-  if(valueEl){ valueEl.textContent = isNaN(num) ? '--' : num.toFixed(2); valueEl.style.color = color; }
+  if(valueEl) valueEl.textContent = valueText(val);
+  const progress = document.getElementById('liveGaugeProgress');
+  if(progress){ progress.style.strokeDashoffset = 100*(1-(pct||0)); progress.style.stroke = color; }
+  const needle = document.getElementById('liveGaugeNeedle');
+  if(needle){
+    needle.style.transform = `rotate(${-angleFor(pct===null ? 0 : pct)}deg)`;
+    needle.classList.toggle('on', pct!==null);
+  }
+  updateBarsChart(pct, color);
   const badge = document.getElementById('verdictBadge');
   if(badge){
-    if(verdict){ badge.className = 'show '+verdict.tone; badge.textContent = verdict.label; }
-    else { badge.className = ''; badge.textContent=''; }
+    if(verdict){ badge.className = 'chip-status show '+verdict.tone; badge.textContent = verdict.label; }
+    else { badge.className = 'chip-status'; badge.textContent=''; }
   }
   const numEl = document.getElementById('checkNum');
   if(numEl){
@@ -537,11 +660,6 @@ function serviceMiniChip(key){
     <span>${s.label}</span>
   </div>`;
 }
-function verdictBadgeHtml(v){
-  if(!v) return '';
-  return `<span class="badge ${v.tone}" style="margin-left:8px;">${v.label}</span>`;
-}
-
 function categoryPct(steps){
   let p=0,t=0;
   steps.forEach(n=>{
@@ -623,23 +741,6 @@ function buildFooter(){
 }
 
 function buildResumen(){
-  const rows = CHECK7.map((step,i)=>{
-    if(step.type==='stabilization'){
-      const done = state.stabilizeDone[step.n];
-      return `<div class="ticket-row" style="animation-delay:${i*0.04}s"><span class="label">${step.n}. ${step.title}</span><span class="val"><span class="badge ${done?'pass':'fail'}">${done?'Completado':'Pendiente'}</span></span></div>`;
-    }
-    const val = state.volts[step.n];
-    const verdict = step.type==='baseline' ? null : verdictFor(step, val);
-    const [min,max] = rangeFor(step);
-    return `<div class="result-row" style="animation-delay:${i*0.04}s">
-      ${gaugeMarkup({size:52, value:val, min, max, verdict, unit:'V', live:false, zone:null, showValue:false})}
-      <div class="result-info">
-        <div class="result-title">${step.n}. ${step.title}</div>
-        <div class="result-sub">${val?val+' V':'Sin lectura'}${verdictBadgeHtml(verdict)}</div>
-      </div>
-    </div>`;
-  }).join('');
-
   const activeServKeys = Object.keys(state.serv).filter(k=>state.serv[k]===true);
   const servActivos = activeServKeys.length ? `<div class="mini-service-grid">${activeServKeys.map(k=>serviceMiniChip(k)).join('')}</div>` : '<span style="color:var(--ink-faint);font-size:13px;">Ninguno marcado</span>';
 
@@ -671,7 +772,7 @@ function buildResumen(){
         </div>
         ${state.pre.observaciones ? `<div class="section-title">Observaciones iniciales</div><p class="obs-text">${state.pre.observaciones}</p>` : ''}
         <div class="section-title">Check 7 — resultados</div>
-        ${rows}
+        ${buildResultGrid()}
         <div class="section-title">Diagnóstico</div>
         <div class="ticket-row"><span class="label">Batería nueva</span><span class="val" style="gap:8px;">${batteryIconHtml(state.diag.bateriaNueva)}<span style="font-family:var(--font-body);font-size:12.5px;font-weight:600;">${state.diag.bateriaNueva===null?'—':(state.diag.bateriaNueva?'Funciona':'No funciona')}</span></span></div>
         <div class="ticket-row"><span class="label">Alternador</span><span class="val" style="gap:8px;">${batteryIconHtml(state.diag.alternador)}<span style="font-family:var(--font-body);font-size:12.5px;font-weight:600;">${state.diag.alternador===null?'—':(state.diag.alternador?'Funciona':'No funciona')}</span></span></div>
